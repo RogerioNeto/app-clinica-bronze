@@ -45,6 +45,9 @@ export default function AgendarPage() {
   const [horaSelecionada, setHoraSelecionada] = useState('');
   const [configuracoesGlobais, setConfiguracoesGlobais] = useState<ConfiguracaoGlobal | null>(null);
   const [isEncaixe, setIsEncaixe] = useState(false);
+  const [idAgendamento, setIdAgendamento] = useState<string | null>(null);
+  const [whatsAppLink, setWhatsAppLink] = useState('');
+  const [whatsAppAdminLink, setWhatsAppAdminLink] = useState('');
 
   // Horários padrão de funcionamento da clínica
   const horariosPadrao = ['08:00', '09:00', '10:00', '11:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00'];
@@ -254,6 +257,7 @@ export default function AgendarPage() {
       if (erroAgend) throw erroAgend;
 
       const agendamentoId = novoAgendamento && novoAgendamento.length > 0 ? novoAgendamento[0].id : null;
+      setIdAgendamento(agendamentoId);
 
       // 4. Salva a relação dos procedimentos escolhidos
       if (agendamentoId) {
@@ -272,17 +276,19 @@ export default function AgendarPage() {
         const fone = `55${whatsapp.replace(/\D/g, '')}`;
         const nomeCliente = nome.split(' ')[0];
 
+        // Pré-prepara URLs do WhatsApp para usar na tela de sucesso
+        let whatsappUrl = '';
+        let whatsappAdminUrl = '';
+
         if (encaixeDetectado) {
-          // Encaixe: notifica admin e cliente
           const msgCliente = encodeURIComponent(
             `Olá *${nomeCliente}*, recebemos sua solicitação de horário! ${String.fromCodePoint(0x1F389)}\n\n` +
             `⚠️ O horário escolhido possui uma pré-reserva. Sua solicitação está pendente de aprovação.\n\n` +
             `${String.fromCodePoint(0x1F4DD)} *Ficha de Anamnese (Obrigatória):*\n${linkAnamnese}\n\n` +
             `Aguardamos a confirmação da equipe! ${String.fromCodePoint(0x2600)}`
           );
-          window.open(`https://wa.me/${fone}?text=${msgCliente}`, '_blank');
+          whatsappUrl = `https://wa.me/${fone}?text=${msgCliente}`;
 
-          // Notifica admin sobre horário duplicado
           const adminFone = configuracoesGlobais?.admin_whatsapp
             ? `55${configuracoesGlobais.admin_whatsapp.replace(/\D/g, '')}`
             : null;
@@ -295,10 +301,9 @@ export default function AgendarPage() {
               `Valor: R$ ${valorTotal.toFixed(2)}\n\n` +
               `Acesse o painel para revisar: ${baseDom}/admin`
             );
-            window.open(`https://wa.me/${adminFone}?text=${msgAdmin}`, '_blank');
+            whatsappAdminUrl = `https://wa.me/${adminFone}?text=${msgAdmin}`;
           }
         } else {
-          // Pré-aprovado: envia sinal, PIX e anamnese
           const msg = encodeURIComponent(
             `Olá *${nomeCliente}*, seu bronze foi pré-aprovado! ${String.fromCodePoint(0x1F389)}\n\n` +
             `${String.fromCodePoint(0x1F4CC)} *Sinal 50%:* R$ ${Number(valorSinal).toFixed(2)}\n` +
@@ -306,8 +311,12 @@ export default function AgendarPage() {
             `${String.fromCodePoint(0x1F4DD)} *Ficha de Anamnese (Obrigatória):*\n${linkAnamnese}\n\n` +
             `Envie o comprovante no WhatsApp para confirmar! Aguardamos você! ${String.fromCodePoint(0x2600)}`
           );
-          window.open(`https://wa.me/${fone}?text=${msg}`, '_blank');
+          whatsappUrl = `https://wa.me/${fone}?text=${msg}`;
         }
+
+        // Salva URLs no state para usar na tela de sucesso
+        setWhatsAppLink(whatsappUrl);
+        setWhatsAppAdminLink(whatsappAdminUrl);
 
         setEtapa(4);
       }
@@ -316,6 +325,19 @@ export default function AgendarPage() {
       alert(`Falha ao registrar: ${err.message || 'Erro inesperado de sintaxe de array.'}`);
     }
   };
+
+  // Abre WhatsApp automaticamente ao chegar na tela de sucesso
+  useEffect(() => {
+    if (etapa === 4 && whatsAppLink) {
+      const timer = setTimeout(() => {
+        try { window.open(whatsAppLink, '_blank'); } catch {}
+        if (whatsAppAdminLink) {
+          try { window.open(whatsAppAdminLink, '_blank'); } catch {}
+        }
+      }, 800);
+      return () => clearTimeout(timer);
+    }
+  }, [etapa, whatsAppLink, whatsAppAdminLink]);
 
   return (
     <div className="w-full max-w-md bg-neutral-900 border border-neutral-800 rounded-2xl p-6 shadow-2xl">
@@ -445,6 +467,13 @@ export default function AgendarPage() {
               <span className="block mt-3 text-emerald-400 font-semibold bg-emerald-500/10 p-3 rounded-lg border border-emerald-500/20">
                 🔑 Chave PIX: {configuracoesGlobais?.chave_pix || 'Consulte seu WhatsApp'}
               </span>
+              <span className="block mt-2 text-xs text-neutral-400">
+                📝 Ficha de anamnese (obrigatória):{' '}
+                <a href={`${configuracoesGlobais?.dominio_app || window.location.origin}/anamnese?id=${idAgendamento}`}
+                   className="text-amber-400 underline" target="_blank" rel="noopener noreferrer">
+                  preencher agora
+                </a>
+              </span>
             </p>
           )}
           <div className="bg-neutral-950 border border-neutral-800 rounded-lg p-3 text-xs text-left text-neutral-400 space-y-1">
@@ -458,7 +487,20 @@ export default function AgendarPage() {
               💰 Deposite o sinal via PIX e envie o comprovante no WhatsApp para confirmar seu horário!
             </p>
           )}
-          <p className="text-xs text-neutral-500 pt-1 animate-pulse">📱 Abrimos o WhatsApp com as instruções. Se não abrir, verifique seu número.</p>
+          {whatsAppLink && (
+            <a
+              href={whatsAppLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-6 py-3 rounded-xl transition-all"
+            >
+              <svg viewBox="0 0 24 24" className="w-5 h-5 fill-current"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+              Abrir WhatsApp
+            </a>
+          )}
+          <p className="text-xs text-neutral-500 pt-1">
+            💬 Clique no botão acima para enviar a mensagem. Se preferir, copie as informações acima.
+          </p>
         </div>
       )}
 
