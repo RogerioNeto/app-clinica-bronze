@@ -3,13 +3,14 @@
 import { useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
-import { Lock, Mail, Sun } from 'lucide-react';
+import { Lock, Mail, Sun, Eye, EyeOff } from 'lucide-react';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [senha, setSenha] = useState('');
   const [carregando, setCarregando] = useState(false);
   const [erro, setErro] = useState('');
+  const [mostrarSenha, setMostrarSenha] = useState(false);
   const router = useRouter();
 
   const lidarComLogin = async (e: React.FormEvent) => {
@@ -78,13 +79,21 @@ export default function LoginPage() {
             <div className="relative">
               <Lock className="absolute left-3 top-3.5 text-neutral-500" size={16} />
               <input
-                type="password"
+                type={mostrarSenha ? 'text' : 'password'}
                 required
                 placeholder="••••••••"
                 value={senha}
                 onChange={e => setSenha(e.target.value)}
-                className="w-full bg-neutral-950 border border-neutral-800 rounded-lg py-3 pl-10 pr-4 text-sm focus:outline-none focus:border-amber-500 text-white placeholder-neutral-600"
+                className="w-full bg-neutral-950 border border-neutral-800 rounded-lg py-3 pl-10 pr-10 text-sm focus:outline-none focus:border-amber-500 text-white placeholder-neutral-600"
               />
+              <button
+                type="button"
+                onClick={() => setMostrarSenha(!mostrarSenha)}
+                className="absolute right-3 top-3 text-neutral-500 hover:text-neutral-300"
+                tabIndex={-1}
+              >
+                {mostrarSenha ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
             </div>
           </div>
 

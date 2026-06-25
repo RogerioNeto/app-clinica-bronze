@@ -5,8 +5,9 @@ import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import {
   DollarSign, Calendar, Sliders, Check, X,
-  PlusCircle, ShoppingBag, ClipboardList, Package, ArrowUpRight, ArrowDownRight, MessageSquare, Printer, User
+  ShoppingBag, ClipboardList, ArrowDownRight, MessageSquare, Printer, User
 } from 'lucide-react';
+import { ComandaPanel } from '@/components/admin/ComandaPanel';
 
 // Interfaces for better type safety
 interface Cliente {
@@ -97,6 +98,7 @@ interface Configuracao {
   whatsapp_instrucoes_unidade_imperador: string;
   whatsapp_instrucoes_unidade_limoeiro: string;
   permitir_domingo_agendamento: boolean;
+  admin_whatsapp?: string;
 }
 
 interface Fornecedor {
@@ -119,10 +121,6 @@ export default function AdminPage() {
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [fornecedores, setFornecedores] = useState<Fornecedor[]>([]);
 
-  const [agendamentoSelecionadoComanda, setAgendamentoSelecionadoComanda] = useState<string | null>(null);
-  const [produtoSelecionadoComanda, setProdutoSelecionadoComanda] = useState<string | null>(null);
-  const [quantidadeComanda, setQuantidadeComanda] = useState<number>(1);
-  const [itensConsumidos, setItensConsumidos] = useState<ComandaProduto[]>([]);
   const [agendamentoProcedimentos, setAgendamentoProcedimentos] = useState<{
     id: string;
     agendamento_id: string;
@@ -130,7 +128,6 @@ export default function AdminPage() {
     procedimentos?: { nome: string };
   }[]>([]);
   const [clienteSendoEditado, setClienteSendoEditado] = useState<Cliente | null>(null);
-  const [formaPagamentoRestante, setFormaPagamentoRestante] = useState<string>('pix');
   const [novaUnidade, setNovaUnidade] = useState({ nome: '', endereco: '', telefone: '' });
   const [novoProcedimento, setNovoProcedimento] = useState({ nome: '', preco: '', duracao: '60' });
   const [novoProduto, setNovoProduto] = useState({ nome: '', preco_custo: '', preco_venda: '', estoque_atual: '', estoque_minimo: '' });
@@ -138,7 +135,7 @@ export default function AdminPage() {
   const [fornecedorInput, setFornecedorInput] = useState('');
 
   // ESTADOS PARA CONFIGURAÇÕES GLOBAIS
-  const [configSet, setConfigSet] = useState<Configuracao>({ id: null, chave_pix: '', dominio_app: '', whatsapp_instrucoes_bronze: '', whatsapp_instrucoes_unidade_imperador: '', whatsapp_instrucoes_unidade_limoeiro: '', permitir_domingo_agendamento: false });
+  const [configSet, setConfigSet] = useState<Configuracao>({ id: null, chave_pix: '', dominio_app: '', whatsapp_instrucoes_bronze: '', whatsapp_instrucoes_unidade_imperador: '', whatsapp_instrucoes_unidade_limoeiro: '', permitir_domingo_agendamento: false, admin_whatsapp: '' });
 
   // Definição de permissão de proprietária
   const isOwner = userEmail === 'supervisaodepostos@gmail.com';
@@ -161,6 +158,7 @@ export default function AdminPage() {
           whatsapp_instrucoes_unidade_imperador: listConfig[0].whatsapp_instrucoes_unidade_imperador || '',
           whatsapp_instrucoes_unidade_limoeiro: listConfig[0].whatsapp_instrucoes_unidade_limoeiro || '',
           permitir_domingo_agendamento: listConfig[0].permitir_domingo_agendamento || false,
+          admin_whatsapp: listConfig[0].admin_whatsapp || '',
         });
       }
     } catch (err) { console.error("Erro ao buscar configurações:", err); }
@@ -237,15 +235,6 @@ export default function AdminPage() {
       setAbaAtiva('agendamentos');
     }
   }, [abaAtiva, userEmail, isOwner]);
-
-  useEffect(() => {
-    async function carregarItensComanda() {
-      if (!agendamentoSelecionadoComanda) { setItensConsumidos([]); return; }
-      const { data } = await supabase.from('comanda_produtos').select('*, produtos(nome)').eq('agendamento_id', agendamentoSelecionadoComanda);
-      if (data) setItensConsumidos(data);
-    }
-    carregarItensComanda();
-  }, [agendamentoSelecionadoComanda]);
 
   // FUNÇÃO UNIFICADA E BLINDADA PARA ALTERAR STATUS (APROVAR / RECUSAR)
   const alterarStatusAgendamento = async (id: string, novoStatus: string, valorSinal?: number, unidadeId?: string) => {
@@ -370,7 +359,7 @@ export default function AdminPage() {
   const cadastrarProduto = async (e: React.FormEvent) => {
     e.preventDefault(); if (!novoProduto.nome || !novoProduto.preco_venda) { alert("Nome e preço de venda do produto são obrigatórios."); return; }
     await supabase.from('produtos').insert([{ nome: novoProduto.nome, preco_custo: parseFloat(novoProduto.preco_custo || '0'), preco_venda: parseFloat(novoProduto.preco_venda), estoque_atual: parseInt(novoProduto.estoque_atual || '0', 10), estoque_minimo: parseInt(novoProduto.estoque_minimo || '2', 10) }]);
-    setProdutoSelecionadoComanda(''); setNovaDespesa({ descricao: '', valor: '', unidade_id: '' }); await buscarDadosGerais(); // Recarrega
+    setNovaDespesa({ descricao: '', valor: '', unidade_id: '' }); await buscarDadosGerais(); // Recarrega
   };
 
   const salvarConfiguracoes = async (e: React.FormEvent) => {
@@ -382,6 +371,7 @@ export default function AdminPage() {
         whatsapp_instrucoes_bronze: configSet.whatsapp_instrucoes_bronze || '',
         whatsapp_instrucoes_unidade_imperador: configSet.whatsapp_instrucoes_unidade_imperador || '',
         whatsapp_instrucoes_unidade_limoeiro: configSet.whatsapp_instrucoes_unidade_limoeiro || '',
+        admin_whatsapp: configSet.admin_whatsapp || '',
       };
 
       // Só enviamos o ID se ele já existir no estado (carregado do banco)
@@ -401,100 +391,6 @@ export default function AdminPage() {
   };
 
   // FUNÇÃO DE LANÇAMENTO BLINDADA: Só permite lançar se o agendamento NÃO estiver concluído
-  const lancarItemComanda = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!agendamentoSelecionadoComanda || !produtoSelecionadoComanda) { alert("Selecione um agendamento e um produto."); return; }
-
-    const agObj = agendamentos.find(a => a.id === agendamentoSelecionadoComanda);
-    if (agObj?.status === 'CONCLUÍDO') {
-      alert("❌ Operação Bloqueada! Esta comanda já está encerrada e fechada. Não é possível adicionar novos produtos.");
-      return;
-    }
-    
-    const pObj = produtos.find(p => p.id === produtoSelecionadoComanda);
-    if (!pObj || pObj.estoque_atual < quantidadeComanda) { alert("⚠️ Estoque insuficiente!"); return; }
-
-    await supabase.from('comanda_produtos').insert([{ agendamento_id: agendamentoSelecionadoComanda, produto_id: produtoSelecionadoComanda, quantidade: quantidadeComanda, preco_unitario: pObj.preco_venda }]);
-    await supabase.from('produtos').update({ estoque_atual: pObj.estoque_atual - quantidadeComanda }).eq('id', produtoSelecionadoComanda);
-
-    await buscarDadosGerais(); // Recarrega para atualizar a lista de itens e o estoque
-    alert("✅ Item adicionado à comanda da cliente com sucesso!"); // Alerta depois do refresh
-  };
-
-  const calcularRestanteAcumulado = () => {
-    const agObj = agendamentos.find(a => a.id === agendamentoSelecionadoComanda);
-    if (!agObj) return { subtotalBronze: 0, sinalPago: 0, restanteBronze: 0, totalProdutos: 0, totalGeralPagar: 0 }; // Ensure agObj is not null
-    const subtotalBronze = Number(agObj.valor_procedimentos);
-    const sinalPago = Number(agObj.valor_sinal);
-    const restanteBronze = subtotalBronze - sinalPago;
-    const totalProdutos = itensConsumidos.reduce((s, i) => s + (Number(i.preco_unitario) * i.quantidade), 0);
-    return { subtotalBronze, sinalPago, restanteBronze, totalProdutos, totalGeralPagar: restanteBronze + totalProdutos };
-  };
-
-  const fecharComandaTotal = async () => {
-    if (!agendamentoSelecionadoComanda) return;
-    try {
-      const agObj = agendamentos.find(a => a.id === agendamentoSelecionadoComanda); // Ensure agObj is not null
-      if (!agObj) return;
-
-      // Validação de Anamnese antes de fechar a conta
-      const { data: anamneseData } = await supabase
-        .from('anamneses')
-        .select('id')
-        .eq('cliente_id', agObj.cliente_id)
-        .limit(1);
-
-      if (!anamneseData || anamneseData.length === 0) {
-        alert("❌ OPERAÇÃO BLOQUEADA: Esta cliente ainda não preencheu a ficha de anamnese digital. É obrigatório o registro de saúde para concluir o atendimento.");
-        return;
-      }
-
-      const { totalGeralPagar } = calcularRestanteAcumulado();
-
-      // Se já estiver pago no caixa, apenas corrigimos o status do agendamento
-      const check = await supabase.from('fluxo_caixa').select('id').eq('agendamento_id', agendamentoSelecionadoComanda).like('descricao', '%Fechamento Total%');
-      if (check.data && check.data.length > 0) {
-        const { error: errUp } = await supabase
-          .from('agendamentos')
-          .update({ status: 'CONCLUÍDO' })
-          .eq('id', agendamentoSelecionadoComanda)
-          .select();
-          
-        if (errUp) throw errUp; // Handle potential error
-        await buscarDadosGerais(); // Recarrega antes do alerta
-        alert("✅ Esta comanda já estava paga. Status do agendamento sincronizado para CONCLUÍDO!"); // Alerta depois do refresh
-        setAgendamentoSelecionadoComanda(''); await buscarDadosGerais(); return;
-      }
-
-      if (confirm(`Fechar conta e receber R$ ${totalGeralPagar.toFixed(2)} via ${formaPagamentoRestante.toUpperCase()}?`)) {
-        const { error: errCaixa } = await supabase.from('fluxo_caixa').insert([{
-          unidade_id: agObj?.unidade_id,
-          tipo: 'entrada',
-          valor: totalGeralPagar,
-          descricao: `Fechamento Total: ${agObj?.clientes?.nome_completo} (${formaPagamentoRestante.toUpperCase()})`,
-          forma_pagamento: formaPagamentoRestante,
-          agendamento_id: agendamentoSelecionadoComanda
-        }]);
-        if (errCaixa) throw errCaixa;
-
-        const { error: errUp } = await supabase
-          .from('agendamentos')
-          .update({ status: 'CONCLUÍDO' })
-          .eq('id', agendamentoSelecionadoComanda)
-          .select();
-          
-        if (errUp) throw errUp;
-
-        alert("🎉 Comanda encerrada e baixada com sucesso!");
-        setAgendamentoSelecionadoComanda(null); // Limpa a seleção
-        await buscarDadosGerais();
-      }
-    } catch (err: any) {
-      console.error("Erro no fechamento:", err);
-      alert("❌ Erro ao fechar comanda: " + (err.message || "Verifique permissões."));
-    }
-  };
-
   const salvarEdicaoCliente = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!clienteSendoEditado) return;
@@ -916,119 +812,11 @@ export default function AdminPage() {
 
         {/* TAB 2: CONSUMO E COMANDA */}
         {abaAtiva === 'comandas' && (
-          <div className="space-y-6">
-            <h1 className="text-2xl font-bold">Consumo e Fechamento de Comanda</h1>
-            <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6">
-              <form onSubmit={lancarItemComanda} className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
-                <div>
-                  <label className="text-xs text-neutral-400 block mb-2">Clientes com Sessão Iniciada</label>
-                  <select value={agendamentoSelecionadoComanda || ''} onChange={e => setAgendamentoSelecionadoComanda(e.target.value)} className="w-full bg-neutral-950 border border-neutral-800 rounded-lg p-3 text-sm text-white">
-                    <option value="">Selecione uma cliente...</option>
-                    {agendamentos
-                      .filter(a => a.status === 'CONFIRMADO')
-                      .map(a => <option key={a.id} value={a.id}>{a.clientes?.nome_completo} ({new Date(a.data_hora_inicio).toLocaleDateString('pt-BR')})</option>)
-                    }
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs text-neutral-400 block mb-2">Produto</label>
-                  <select value={produtoSelecionadoComanda || ''} onChange={e => setProdutoSelecionadoComanda(e.target.value)} className="w-full bg-neutral-950 border border-neutral-800 rounded-lg p-3 text-sm text-white">
-                    <option value="">Escolha...</option>
-                    {produtos.map(p => (
-                      <option key={p.id} value={p.id}>{p.nome} (Estoque: {p.estoque_atual})</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs text-neutral-400 block mb-2">Quantidade</label>
-                  <input type="number" min="1" value={quantidadeComanda} onChange={e => setQuantidadeComanda(parseInt(e.target.value))} className="w-full bg-neutral-950 border border-neutral-800 rounded-lg p-3 text-sm text-white" />
-                </div>
-                <button type="submit" disabled={!agendamentoSelecionadoComanda} className="bg-amber-500 text-black font-bold p-3 rounded-lg text-sm flex items-center justify-center gap-2 disabled:opacity-40"><PlusCircle size={14} /> Lançar Item</button>
-              </form>
-            </div>
-
-            {agendamentoSelecionadoComanda && (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-5 md:col-span-2 space-y-2">
-                  <h3 className="text-sm font-bold text-neutral-200">Produtos Consumidos</h3>
-                  {itensConsumidos.map((item) => (
-                    <div key={item.id} className="py-2 border-b border-neutral-800 text-xs flex justify-between">
-                      <div><span>{item.produtos?.nome}</span> <span className="text-neutral-500">(x{item.quantidade})</span></div>
-                      <strong>R$ {(Number(item.preco_unitario) * item.quantidade).toFixed(2)}</strong>
-                    </div>
-                  ))}
-                  {itensConsumidos.length === 0 && <p className="text-xs text-neutral-500 py-4 text-center">Nenhum produto na comanda.</p>}
-                </div>
-
-                <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-5 space-y-4">
-                  <h3 className="text-sm font-bold text-amber-400">Resumo da Conta</h3>
-                  <div className="space-y-1.5 text-xs text-neutral-400">
-                    <div className="flex justify-between"><span>Restante Bronze:</span><span>R$ {(Number(agendamentos.find(a => a.id === agendamentoSelecionadoComanda)?.valor_procedimentos) - Number(agendamentos.find(a => a.id === agendamentoSelecionadoComanda)?.valor_sinal)).toFixed(2)}</span></div>
-                    <div className="flex justify-between border-b border-neutral-800 pb-2"><span>Total Lingeries:</span><span>R$ {itensConsumidos.reduce((s, i) => s + (Number(i.preco_unitario) * i.quantidade), 0).toFixed(2)}</span></div>
-                    <div className="flex justify-between items-center text-sm font-bold text-white pt-2">
-                      <span>A pagar na clínica:</span>
-                      <span className="text-amber-400 text-base">R$ {calcularRestanteAcumulado().totalGeralPagar.toFixed(2)}</span> {/* Exibe o total a pagar */}
-                    </div>
-                  </div>
-
-                  {agendamentos.find(a => a.id === agendamentoSelecionadoComanda)?.status === 'CONCLUÍDO' ? (
-                    <div className="bg-neutral-950 border border-neutral-800 p-3 rounded-xl text-center text-xs font-bold text-neutral-400">
-                      🔒 COMANDA JÁ FECHADA
-                    </div>
-                  ) : (
-                    <>
-                      <div className="space-y-1">
-                        <label className="text-[11px] text-neutral-400 block font-medium">Método de Recebimento:</label>
-                        <select
-                          value={formaPagamentoRestante}
-                          onChange={e => setFormaPagamentoRestante(e.target.value)}
-                          className="w-full bg-neutral-950 border border-neutral-800 rounded-lg p-2 text-xs text-white focus:outline-none"
-                        >
-                          <option value="pix">Pix</option>
-                          <option value="cartao_credito">Cartão de Crédito</option>
-                          <option value="cartao_debito">Cartão de Débito</option>
-                          <option value="dinheiro">Dinheiro (Espécie)</option>
-                        </select>
-                      </div>
-                      <button onClick={fecharComandaTotal} className="w-full bg-emerald-600 text-neutral-950 font-black py-2.5 rounded-lg text-xs">FECHAR CONTA E RECEBER</button>
-                    </>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* LISTA DE COMANDAS ABERTAS E FECHADAS DO DIA */}
-            <div className="bg-neutral-900 border border-neutral-800 rounded-2xl overflow-hidden mt-6">
-              <div className="p-4 bg-neutral-950 border-b border-neutral-800 font-bold text-xs text-neutral-400 uppercase tracking-wider">Status das Comandas Recentes</div>
-              <div className="divide-y divide-neutral-800 overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead>
-                    <tr className="text-neutral-500 uppercase font-black bg-neutral-900/50">
-                      <th className="p-3">Cliente</th>
-                      <th className="p-3">Data</th>
-                      <th className="p-3 text-right">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {agendamentos
-                      .filter(a => a.status === 'CONFIRMADO' || a.status === 'CONCLUÍDO') // Mostra apenas confirmados e concluídos
-                      .slice(0, 10)
-                      .map(a => (
-                        <tr key={a.id} className="hover:bg-neutral-800/30">
-                          <td className="p-3 font-medium">{a.clientes?.nome_completo}</td>
-                          <td className="p-3">{new Date(a.data_hora_inicio).toLocaleDateString('pt-BR')}</td>
-                          <td className="p-3 text-right">
-                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${a.status === 'CONCLUÍDO' ? 'bg-blue-900/40 text-blue-400' : 'bg-emerald-900/40 text-emerald-400 animate-pulse'}`}>
-                              {a.status === 'CONCLUÍDO' ? 'FECHADA' : 'EM ATENDIMENTO'}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
+          <ComandaPanel
+            agendamentos={agendamentos}
+            produtos={produtos}
+            buscarDadosGerais={buscarDadosGerais}
+          />
         )}
 
         {/* TAB 3: CADASTROS */}
@@ -1103,15 +891,27 @@ export default function AdminPage() {
                     <textarea value={configSet.whatsapp_instrucoes_unidade_limoeiro} onChange={e => setConfigSet({ ...configSet, whatsapp_instrucoes_unidade_limoeiro: e.target.value })} className="w-full bg-neutral-950 border border-neutral-800 p-2.5 rounded-lg text-xs h-24" placeholder="Ex: Só apertar a campainha e aguardar..."></textarea>
                   </div>
                 </div>
-                <div className="md:col-span-3 flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    id="permitirDomingo"
-                    checked={configSet.permitir_domingo_agendamento}
-                    onChange={e => setConfigSet({ ...configSet, permitir_domingo_agendamento: e.target.checked })}
-                    className="form-checkbox h-4 w-4 text-amber-500 transition duration-150 ease-in-out bg-neutral-950 border-neutral-800 rounded"
-                  />
-                  <label htmlFor="permitirDomingo" className="text-xs text-neutral-400">Permitir agendamentos aos Domingos (ignora bloqueio padrão)</label>
+                <div className="md:col-span-3 grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-[10px] text-neutral-500 uppercase font-bold block mb-1">WhatsApp do Admin (para notificações)</label>
+                    <input
+                      type="text"
+                      value={configSet.admin_whatsapp || ''}
+                      onChange={e => setConfigSet({ ...configSet, admin_whatsapp: e.target.value })}
+                      className="w-full bg-neutral-950 border border-neutral-800 p-2.5 rounded-lg text-xs"
+                      placeholder="Ex: 11999999999"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2 pt-5">
+                    <input
+                      type="checkbox"
+                      id="permitirDomingo"
+                      checked={configSet.permitir_domingo_agendamento}
+                      onChange={e => setConfigSet({ ...configSet, permitir_domingo_agendamento: e.target.checked })}
+                      className="form-checkbox h-4 w-4 text-amber-500 transition duration-150 ease-in-out bg-neutral-950 border-neutral-800 rounded"
+                    />
+                    <label htmlFor="permitirDomingo" className="text-xs text-neutral-400">Permitir agendamentos aos Domingos (ignora bloqueio padrão)</label>
+                  </div>
                 </div>
                 <button type="submit" className="bg-emerald-600 text-white py-2.5 rounded-lg text-xs font-black hover:bg-emerald-500 transition">SALVAR ALTERAÇÕES</button>
               </form>

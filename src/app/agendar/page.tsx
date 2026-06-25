@@ -25,6 +25,9 @@ preco: number;
 
 interface ConfiguracaoGlobal {
   permitir_domingo_agendamento: boolean;
+  chave_pix: string;
+  dominio_app: string;
+  admin_whatsapp?: string;
 }
 
 export default function AgendarPage() {
@@ -61,11 +64,18 @@ export default function AgendarPage() {
     async function carregarDados() {
       const { data: listaUnidades } = await supabase.from('unidades').select('*');
       const { data: listaProcedimentos } = await supabase.from('procedimentos').select('*');
-      const { data: configData } = await supabase.from('configuracoes').select('permitir_domingo_agendamento').maybeSingle();
+      const { data: configData } = await supabase.from('configuracoes').select('*').maybeSingle();
 
       if (listaUnidades) setUnidades(listaUnidades);
       if (listaProcedimentos) setProcedimentos(listaProcedimentos);
-      if (configData) setConfiguracoesGlobais(configData as ConfiguracaoGlobal);
+      if (configData) {
+        setConfiguracoesGlobais({
+          permitir_domingo_agendamento: configData.permitir_domingo_agendamento || false,
+          chave_pix: configData.chave_pix || '',
+          dominio_app: configData.dominio_app || '',
+          admin_whatsapp: configData.admin_whatsapp || undefined,
+        });
+      }
     }
     carregarDados();
   }, []);
@@ -224,8 +234,9 @@ export default function AgendarPage() {
       const encaixeDetectado = !!(agendamentosExistentes && agendamentosExistentes.length > 0);
       setIsEncaixe(encaixeDetectado);
 
-      // 3. Salva a solicitação do agendamento vinculada ao ID correto da nova cliente
+      // 3. Salva a solicitação do agendamento com status correto
       const valorTotal = calcularTotal();
+      const statusInicial = encaixeDetectado ? 'AGUARDANDO_APROVACAO' : 'AGUARDANDO_SINAL';
       console.log("📅 Gravando agendamento na tabela...");
       const { data: novoAgendamento, error: erroAgend } = await supabase
         .from('agendamentos')
@@ -236,13 +247,12 @@ export default function AgendarPage() {
           data_hora_fim: fim.toISOString(),
           valor_procedimentos: valorTotal,
           valor_sinal: valorTotal * 0.5,
-          status: 'AGUARDANDO_APROVACAO'
+          status: statusInicial
         }])
         .select('id');
 
       if (erroAgend) throw erroAgend;
 
-      // CORREÇÃO CRÍTICA DO ARRAY [0]: Garante o ID do agendamento para a tabela pivô
       const agendamentoId = novoAgendamento && novoAgendamento.length > 0 ? novoAgendamento[0].id : null;
 
       // 4. Salva a relação dos procedimentos escolhidos
@@ -255,7 +265,50 @@ export default function AgendarPage() {
         const { error: erroItens } = await supabase.from('agendamento_procedimentos').insert(itens);
         if (erroItens) throw erroItens;
 
-        console.log("🎉 Agendamento concluído com sucesso total!");
+        const valorSinal = valorTotal * 0.5;
+        const chavePix = configuracoesGlobais?.chave_pix || '';
+        const baseDom = configuracoesGlobais?.dominio_app || window.location.origin;
+        const linkAnamnese = `${baseDom}/anamnese?id=${agendamentoId}`;
+        const fone = `55${whatsapp.replace(/\D/g, '')}`;
+        const nomeCliente = nome.split(' ')[0];
+
+        if (encaixeDetectado) {
+          // Encaixe: notifica admin e cliente
+          const msgCliente = encodeURIComponent(
+            `Olá *${nomeCliente}*, recebemos sua solicitação de horário! ${String.fromCodePoint(0x1F389)}\n\n` +
+            `⚠️ O horário escolhido possui uma pré-reserva. Sua solicitação está pendente de aprovação.\n\n` +
+            `${String.fromCodePoint(0x1F4DD)} *Ficha de Anamnese (Obrigatória):*\n${linkAnamnese}\n\n` +
+            `Aguardamos a confirmação da equipe! ${String.fromCodePoint(0x2600)}`
+          );
+          window.open(`https://wa.me/${fone}?text=${msgCliente}`, '_blank');
+
+          // Notifica admin sobre horário duplicado
+          const adminFone = configuracoesGlobais?.admin_whatsapp
+            ? `55${configuracoesGlobais.admin_whatsapp.replace(/\D/g, '')}`
+            : null;
+          if (adminFone) {
+            const msgAdmin = encodeURIComponent(
+              `⚠️ *NOVA SOLICITAÇÃO EM HORÁRIO OCUPADO*\n\n` +
+              `Cliente: *${nome}*\nWhatsApp: ${whatsapp}\n` +
+              `Data: ${new Date(inicio).toLocaleDateString('pt-BR')}\n` +
+              `Horário: ${horaSelecionada}\n` +
+              `Valor: R$ ${valorTotal.toFixed(2)}\n\n` +
+              `Acesse o painel para revisar: ${baseDom}/admin`
+            );
+            window.open(`https://wa.me/${adminFone}?text=${msgAdmin}`, '_blank');
+          }
+        } else {
+          // Pré-aprovado: envia sinal, PIX e anamnese
+          const msg = encodeURIComponent(
+            `Olá *${nomeCliente}*, seu bronze foi pré-aprovado! ${String.fromCodePoint(0x1F389)}\n\n` +
+            `${String.fromCodePoint(0x1F4CC)} *Sinal 50%:* R$ ${Number(valorSinal).toFixed(2)}\n` +
+            `${String.fromCodePoint(0x1F511)} *Chave Pix:* ${chavePix}\n\n` +
+            `${String.fromCodePoint(0x1F4DD)} *Ficha de Anamnese (Obrigatória):*\n${linkAnamnese}\n\n` +
+            `Envie o comprovante no WhatsApp para confirmar! Aguardamos você! ${String.fromCodePoint(0x2600)}`
+          );
+          window.open(`https://wa.me/${fone}?text=${msg}`, '_blank');
+        }
+
         setEtapa(4);
       }
     } catch (err: any) {
@@ -377,23 +430,35 @@ export default function AgendarPage() {
         <div className="text-center py-6 space-y-4">
           <div className="flex justify-center text-emerald-500"><CheckCircle2 size={56} className="animate-bounce" /></div>
           <h2 className="text-xl font-bold text-neutral-100">
-            {isEncaixe ? 'Solicitação de Encaixe Recebida!' : 'Solicitação Recebida!'}
+            {isEncaixe ? 'Solicitação de Encaixe Recebida!' : 'Pré-aprovado! ☀️'}
           </h2>
-          <p className="text-sm text-neutral-400 px-4">
-            Olá <span className="text-amber-400 font-bold">{nome}</span>, seu agendamento foi enviado com sucesso.
-            {isEncaixe && (
+          {isEncaixe ? (
+            <p className="text-sm text-neutral-400 px-4">
+              Olá <span className="text-amber-400 font-bold">{nome}</span>, recebemos sua solicitação.
               <span className="block mt-2 text-amber-500 font-semibold bg-amber-500/10 p-2 rounded-lg border border-amber-500/20">
-                ⚠️ Observação: Este horário possui uma pré-reserva. Sua solicitação está pendente de aprovação para encaixe no horário. Aguarde nosso retorno no WhatsApp!
+                ⚠️ Este horário possui uma pré-reserva. Sua solicitação está pendente de aprovação para encaixe.
               </span>
-            )}
-          </p>
+            </p>
+          ) : (
+            <p className="text-sm text-neutral-400 px-4">
+              Olá <span className="text-amber-400 font-bold">{nome}</span>, sua sessão foi pré-aprovada!
+              <span className="block mt-3 text-emerald-400 font-semibold bg-emerald-500/10 p-3 rounded-lg border border-emerald-500/20">
+                🔑 Chave PIX: {configuracoesGlobais?.chave_pix || 'Consulte seu WhatsApp'}
+              </span>
+            </p>
+          )}
           <div className="bg-neutral-950 border border-neutral-800 rounded-lg p-3 text-xs text-left text-neutral-400 space-y-1">
             <p>📅 <strong>Dia:</strong> {dataSelecionada.split('-').reverse().join('/')}</p>
             <p>⏰ <strong>Horário:</strong> {horaSelecionada}</p>
             <p>💰 <strong>Valor Total:</strong> R$ {calcularTotal().toFixed(2)}</p>
             <p>🔒 <strong>Sinal (50%):</strong> R$ {(calcularTotal() * 0.5).toFixed(2)}</p>
           </div>
-          <p className="text-xs text-amber-500 font-medium pt-2 animate-pulse">Você receberá o link de confirmação e pagamento no seu WhatsApp em instantes!</p>
+          {!isEncaixe && (
+            <p className="text-xs text-amber-400 font-medium pt-2">
+              💰 Deposite o sinal via PIX e envie o comprovante no WhatsApp para confirmar seu horário!
+            </p>
+          )}
+          <p className="text-xs text-neutral-500 pt-1 animate-pulse">📱 Abrimos o WhatsApp com as instruções. Se não abrir, verifique seu número.</p>
         </div>
       )}
 

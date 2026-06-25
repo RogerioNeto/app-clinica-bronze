@@ -201,6 +201,14 @@ function AnamneseForm() {
             </div>
 
             <div className="flex justify-between items-center bg-neutral-900 p-2.5 rounded-lg border border-neutral-800">
+              <span className="text-sm text-neutral-300">Usa ácidos atualmente (Vit C, Retinol, Glicólico)?</span>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => atualizarCampo('uso_acidos_atualmente', 'sim')} className={`px-3 py-1 rounded text-xs font-bold ${respostas.uso_acidos_atualmente === 'sim' ? 'bg-amber-500 text-black' : 'bg-neutral-800'}`}>SIM</button>
+                <button type="button" onClick={() => atualizarCampo('uso_acidos_atualmente', 'nao')} className={`px-3 py-1 rounded text-xs font-bold ${respostas.uso_acidos_atualmente === 'nao' ? 'bg-emerald-600 text-white' : 'bg-neutral-800'}`}>NÃO</button>
+              </div>
+            </div>
+
+            <div className="flex justify-between items-center bg-neutral-900 p-2.5 rounded-lg border border-neutral-800">
               <span className="text-sm text-neutral-300">Tomando antibiótico ou anti-inflamatório?</span>
               <div className="flex gap-2">
                 <button type="button" onClick={() => atualizarCampo('antibioticos_antiinflamatorios', 'sim')} className={`px-3 py-1 rounded text-xs font-bold ${respostas.antibioticos_antiinflamatorios === 'sim' ? 'bg-amber-500 text-black' : 'bg-neutral-800'}`}>SIM</button>
